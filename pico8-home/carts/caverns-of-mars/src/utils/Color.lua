@@ -1,0 +1,17 @@
+
+--[[const]] BLACK = 0
+--[[const]] DARK_BLUE = 1
+--[[const]] DARK_PURPLE = 2
+--[[const]] DARK_GREEN = 3
+--[[const]] BROWN = 4
+--[[const]] DARK_GRAY = 5
+--[[const]] LIGHT_GRAY = 6
+--[[const]] WHITE = 7
+--[[const]] RED = 8
+--[[const]] ORANGE = 9
+--[[const]] YELLOW = 10 -- a
+--[[const]] GREEN = 11  -- b
+--[[const]] BLUE = 12   -- c
+--[[const]] INDIGO = 13 -- d
+--[[const]] PINK = 14   -- e
+--[[const]] PEACH = 15   -- f

@@ -1,0 +1,45 @@
+
+
+/#*
+
+*~
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# fabric
+
+run/
+
+/pico8-home/activity_log.txt
+/pico8-home/config.txt
+/pico8-home/favourites.txt
+/pico8-home/log.txt
+/pico8-home/sdl_controllers.txt
+/pico8-home/backup/
+/pico8-home/bbs/
+/pico8-home/cdata/

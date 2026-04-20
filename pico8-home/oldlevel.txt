@@ -1,0 +1,270 @@
+
+-- =============================================
+-- Shaft-and-ledge terrain generator
+-- =============================================
+-- Slice convention: {lx, rx} per row.
+--   lx = first OPEN pixel on left  (wall ends at lx-1)
+--   rx = first SOLID pixel on right (wall starts at rx)
+--
+-- Section sequencing: driven by the authored LEVEL_SECTIONS list (see Level.lua).
+-- Each entry in LEVEL_SECTIONS is a descriptor table:
+--   { generator = <fn>, ...section-specific params... }
+-- The master loop calls section.generator(section, gen, targets) and advances
+-- through the list, looping back to index 1 when exhausted.
+--
+-- Built-in generators (defined below):
+--   gen_default_shaft  – straight or diagonal shaft; see params below
+--   gen_left_ledge     – left  wall ledge; section.pads = {ttype, ttype, ttype}
+--   gen_right_ledge    – right wall ledge; section.pads = {ttype, ttype, ttype}
+--        Ramps carry lj/rj flags -> jaggedness only on the moving wall.
+--        Flat pads always perfectly straight -> stable target platforms.
+--        Underhang row snaps the wall back to default in one step.
+
+function GameScreen:initTerrain()
+    self.scroll_frac     = 0
+    self.terrain_base_wy = 0
+    self.terrain         = {}
+    self.gen = {
+        sec_idx = 1,    -- index into LEVEL_SECTIONS (wraps when exhausted)
+        phases  = {},   -- phase queue, consumed front-first with deli()
+        pr      = 0,    -- rows consumed in phases[1]
+        next_wy = 0,    -- world-y of the next row to be generated
+        cur_lx  = WALL_INSET,       -- left  wall x at end of the last section pushed
+        cur_rx  = 128 - WALL_INSET, -- right wall x at end of the last section pushed
+    }
+    for _ = 1, TERRAIN_SLICES do
+        add(self.terrain, self:nextSliceFromGen())
+    end
+end
+IGNORE THIS
+
+IGNORED_FOR_NOW = {
+    { generator = gen_default_shaft, height = 100, lx = 4, rx = 124, rate_l = .1, rate_r=.1 },
+
+
+    -- missile wave: positive int = rocket at x, negative int = fuel-rocket at abs(x)
+    { generator = gen_missile_wave, iterations = 2, wave = {
+        1, -7, 12, 0, 7, 0, 8, 1, 9, 0, 14, 4, 0, -1, 13, 1, 6, -1, 12, 0,
+        5, 0, 10, 0, 7, -13, 8, -1, 4, 13, 1, 0, 13, 1, 12, 0, 
+        3, -3, 9, 0, 6, -10, 4,0, 8, 0, 10, 0, 2, 0, 10, 13, -13, 13,
+        6, 0, 13, 0, 1, -4, 4, 0, 9, 1, 11, -5, 3, 0, 8, 0, 
+        4, -13, 5, 0, 6, 0, 7, 1, 8, 0, 9, -12, 10, 0, 7, 0,
+        2, -3, 13, -9, -7, 8, 8, 0, 11, 0, 3, -12, 5, 0,
+        12, -10
+
+    }},
+
+    { generator = gen_checkpoint },
+    { generator = gen_default_shaft, height = 100 },
+
+    -- left ledge: fuel tank on top pad, missile on middle, radar on bottom
+    { generator = gen_left_ledge,  pads = {TTYPE_FUEL,   TTYPE_ROCKET, TTYPE_NODE}   },
+
+    { generator = gen_default_shaft, height = 50, lx = 16, rx = 75, rate_l = .2, rate_r=.2 },
+
+    -- left ledge: fuel tank on top pad, missile on middle, radar on bottom
+    { generator = gen_left_ledge,  pads = {TTYPE_FUEL,   TTYPE_ROCKET, TTYPE_NODE}   },
+
+
+    { generator = gen_default_shaft, height = 250 },
+
+    -- right ledge: two fuel tanks then a missile
+    { generator = gen_right_ledge, pads = {TTYPE_FUEL,   TTYPE_FUEL,   TTYPE_ROCKET} },
+
+    { generator = gen_default_shaft, height = 35 },
+
+    { generator = gen_default_shaft, height = 35 },
+
+    -- right ledge: missile, radar, fuel tank
+    { generator = gen_right_ledge, pads = {TTYPE_ROCKET, TTYPE_NODE,   TTYPE_FUEL}   },
+
+    { generator = gen_default_shaft, height = 40 }
+}
+
+
+
+
+-- Left-side ledge: left wall protrudes inward.
+-- section.pads  = {ttype1, ttype2, ttype3} — one TTYPE_* per LEDGE_PAD_COUNT pad.
+-- section.inset = starting x of the left wall; defaults to gen.cur_lx (seamless)
+function gen_left_ledge(section, gen, targets)
+    gen_ledge(section, gen, targets, -1)
+end
+
+-- Right-side ledge: right wall protrudes inward.
+-- section.pads  = {ttype1, ttype2, ttype3} — one TTYPE_* per LEDGE_PAD_COUNT pad.
+-- section.inset = starting x of the right wall; defaults to gen.cur_rx (seamless)
+function gen_right_ledge(section, gen, targets)
+    gen_ledge(section, gen, targets, 1)
+end
+
+-- Internal: builds ledge phases and places targets for one full ledge.
+-- side=-1 → left wall moves inward;  side=1 → right wall moves inward.
+-- Do not reference gen_ledge directly from LEVEL_SECTIONS.
+function gen_ledge(section, gen, targets, side)
+    local LW         = WALL_INSET
+    local RW         = 128 - WALL_INSET
+    -- IL/IR: starting x of each wall.
+    -- The protruding wall defaults to the preceding section's edge (seamless join).
+    -- The fixed wall always stays at the hard screen inset.
+    local IL = (side == -1) and (section.inset or gen.cur_lx) or LW
+    local IR = (side ==  1) and (section.inset or gen.cur_rx) or RW
+    local section_wy = gen.next_wy
+    local row_off    = 0
+    local n          = LEDGE_PAD_COUNT
+    local ds         = LEDGE_DIAG_STEP
+    local pw         = LEDGE_PAD_W
+    local sp         = ds + pw
+
+    local function wl(k)  return (side==-1) and IL + k*sp      or IL end
+    local function wlc(k) return (side==-1) and IL + k*sp + ds or IL end
+    local function wr(k)  return (side== 1) and IR - k*sp      or IR end
+    local function wrc(k) return (side== 1) and IR - k*sp - ds or IR end
+
+    for k = 0, n - 1 do
+        -- diagonal ramp: wall moves ds px inward over LEDGE_DIAG_H rows
+        add(gen.phases, {rows=LEDGE_DIAG_H,
+            lx0=wl(k),   lx1=wlc(k),
+            rx0=wr(k),   rx1=wrc(k),
+            lj=(side==-1), rj=(side==1)})
+        row_off += LEDGE_DIAG_H
+
+        -- flat pad face (LEDGE_PAD_H rows; 0 = step lip is purely implicit)
+        add(gen.phases, {rows=LEDGE_PAD_H,
+            lx0=wl(k+1), lx1=wl(k+1),
+            rx0=wr(k+1), rx1=wr(k+1),
+            lj=false, rj=false})
+        -- authored target: type comes explicitly from section.pads[k+1]
+        local ttype = (section.pads and section.pads[k+1]) or TTYPE_ROCKET
+        local cx    = (side == -1)
+                      and (wl(k+1) - pw + pw\2)
+                      or  (wr(k+1) + 1 + pw\2)
+        add(targets, {
+            world_y = section_wy + row_off,
+            x       = cx,
+            ttype   = ttype,
+            alive   = true,
+        })
+        row_off += LEDGE_PAD_H
+    end
+
+    -- final diagonal after last pad
+    add(gen.phases, {rows=LEDGE_DIAG_H,
+        lx0=wl(n), lx1=wlc(n),
+        rx0=wr(n), rx1=wrc(n),
+        lj=(side==-1), rj=(side==1)})
+
+    -- sheer vertical face at deepest inward point
+    add(gen.phases, {rows=LEDGE_FACE_H,
+        lx0=wlc(n), lx1=wlc(n),
+        rx0=wrc(n), rx1=wrc(n),
+        lj=false, rj=false})
+
+    -- underhang: snap protruding wall back to its inset; fixed wall unchanged
+    add(gen.phases, {rows=1, lx0=IL, lx1=IL, rx0=IR, rx1=IR, lj=false, rj=false})
+end
+
+-- Checkpoint: no terrain is generated. Records the current position so that
+-- respawn() returns the player here instead of the true start of the level.
+-- Place this between sections in LEVEL_SECTIONS whenever you want a save point.
+function gen_checkpoint(section, gen, targets)
+    gen.pending_checkpoint = true
+end
+
+
+
+-- Missile wave: a straight shaft with authored in-tunnel obstacles.
+-- section.wave       = { int, ... }
+--   Positive int → SPRITE_ROCKET    at x = int.
+--   Negative int → SPRITE_FUEL_ROCKET at x = abs(int).
+-- section.iterations = how many times the wave list repeats (default 1).
+-- Section length = #wave * iterations * MISSILE_WAVE_SPACING rows.
+-- Geometry: walls stay sheer at gen.cur_lx / gen.cur_rx for the full section.
+function gen_missile_wave(section, gen, targets)
+    local clx    = gen.cur_lx
+    local crx    = gen.cur_rx
+    local wave   = section.wave
+    local iters  = section.iterations or 1
+    local sp     = MISSILE_WAVE_SPACING
+    local N      = #wave * iters
+    local rows   = max(1, flr(((N - 1) * sp - GAMEPLAY_H) / (SCROLL_SPEED + WAVE_MISSILE_SPEED)))
+    local sec_wy = gen.next_wy
+    -- one flat shaft phase covering the whole wave section
+    add(gen.phases, {rows=rows, lx0=clx, lx1=clx, rx0=crx, rx1=crx,
+                     lj=false, rj=false})
+    -- convert each authored entry into a world-row-placed target, repeated iters times
+    local slot = 0
+    for _ = 1, iters do
+        for i = 1, #wave do
+            local v   = wave[i]
+            if v != 0 then
+                local sid = (v > 0) and SPRITE_ROCKET or SPRITE_FUEL_ROCKET
+                local wx  = ((v > 0) and 4 or 8) + abs(v) * 8
+                local ww  = (sid == SPRITE_FUEL_ROCKET) and 2 or 1
+                add(targets, {
+                    world_y    = sec_wy + slot * sp,
+                    x          = wx,
+                    ttype      = TTYPE_WAVE,
+                    wave_spr   = sid,
+                    wave_spr_w = ww,
+                    alive      = true,
+                })
+            end
+            slot += 1
+        end
+    end
+end
+
+
+
+-- =============================================
+-- Section generator functions
+-- =============================================
+-- Signature: generator(section, gen, targets)
+--   section = descriptor table from LEVEL_SECTIONS (.height, .pads, etc.)
+--   gen     = shared state: gen.phases, gen.pr, gen.next_wy, gen.sec_idx
+--   targets = the live targets table (add target objects here)
+--
+-- To add a new section type: write a function with this signature and
+-- reference it in LEVEL_SECTIONS (Level.lua).
+
+-- Straight or diagonal shaft.
+-- Optional section params:
+--   section.height  – total row count; omit for a random height in [SHAFT_H_MIN, SHAFT_H_MAX]
+--   section.lx      – target left  wall x; defaults to gen.cur_lx (stay vertical)
+--   section.rx      – target right wall x; defaults to gen.cur_rx (stay vertical)
+--   section.rate_l  – left  wall movement px/row toward lx; defaults to SHAFT_DEFAULT_RATE
+--   section.rate_r  – right wall movement px/row toward rx; defaults to SHAFT_DEFAULT_RATE
+-- Omitting lx/rx keeps both walls sheer at whatever x they were at the end of the
+-- previous section. Specifying lx/rx with a finite rate adds a diagonal approach
+-- phase before the flat run.
+function gen_default_shaft(section, gen, targets)
+    local clx = gen.cur_lx
+    local crx = gen.cur_rx
+    local h   = section.height
+             or (SHAFT_H_MIN + flr(rnd(SHAFT_H_MAX - SHAFT_H_MIN + 1)))
+    local tlx = section.lx     or clx
+    local trx = section.rx     or crx
+    local rl  = section.rate_l or SHAFT_DEFAULT_RATE
+    local rr  = section.rate_r or SHAFT_DEFAULT_RATE
+    -- rows each wall needs to cover its distance at its rate
+    local rows_l = (tlx == clx) and 0 or ceil(abs(tlx - clx) / rl)
+    local rows_r = (trx == crx) and 0 or ceil(abs(trx - crx) / rr)
+    local tramp  = min(max(rows_l, rows_r), h)
+    local flat_h = h - tramp
+    if tramp > 0 then
+        -- each wall interpolates toward its target; mid() clamps to prevent overshoot
+        local lx1 = (tlx >= clx)
+                    and mid(clx, clx + rl * tramp, tlx)
+                    or  mid(tlx, clx - rl * tramp, clx)
+        local rx1 = (trx <= crx)
+                    and mid(trx, crx - rr * tramp, crx)
+                    or  mid(crx, crx + rr * tramp, trx)
+        add(gen.phases, {rows=tramp, lx0=clx, lx1=lx1, rx0=crx, rx1=rx1,
+                         lj=false, rj=false})
+    end
+    if flat_h > 0 then
+        add(gen.phases, {rows=flat_h, lx0=tlx, lx1=tlx, rx0=trx, rx1=trx,
+                         lj=false, rj=false})
+    end
+end
