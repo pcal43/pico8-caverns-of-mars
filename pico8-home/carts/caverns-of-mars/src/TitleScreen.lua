@@ -63,7 +63,7 @@ function TitleScreen:draw()
     if self.blink_timer % FPS > (FPS/3) then
         print("press ❎ to start", 30, 121, BLACK)
     end
-    print("pcal", 1, 80, DARK_GRAY)
-    print(VERSION_STRING, 112, 80, DARK_GRAY)
+    print("PCAL", 1, 80, BLACK)
+    print(VERSION_STRING, 112, 80, BLACK)
 end
 
