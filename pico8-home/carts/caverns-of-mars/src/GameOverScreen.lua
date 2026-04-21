@@ -9,9 +9,9 @@ GameOverScreen.new = function(score)
     self.isDone      = false
     self.score       = score
     self.blink_timer = 0
-    if score > HIGH_SCORE then
-        HIGH_SCORE = score
-        dset(0, HIGH_SCORE)
+    if score > highScore then
+        highScore = score
+        dset(0, highScore)
     end
     setmetatable(self, { __index = GameOverScreen })
     return self
@@ -33,7 +33,7 @@ function GameOverScreen:draw()
 
     -- scores
     local sc_str = "your score  "..self.score
-    local hi_str = "high score  "..HIGH_SCORE
+    local hi_str = "high score  "..highScore
     print(sc_str, (128 - #sc_str * 4) \ 2, 50, WHITE)
     print(hi_str, (128 - #hi_str * 4) \ 2, 60, WHITE)
 

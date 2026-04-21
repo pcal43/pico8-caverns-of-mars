@@ -47,7 +47,7 @@ function TitleScreen:draw()
 
     -- title sprite: 60×32px source at sprite 192, doubled to 120×64px, centred
     -- sprite 192 = spritesheet pixel (0, 96)
-    sspr(0, 96, 60, 32, (128 - 120) \ 2, 0, 120, 64)
+    sspr(0, 96, 60, 32, (128 - 120) \ 2, 2, 120, 64)
 
     -- player ship, centred just above the surface
     local ship_x = (128 - SHIP_WIDTH) \ 2
@@ -57,10 +57,7 @@ function TitleScreen:draw()
     draw_martian_surface(72)
 
     -- copyright text below cavern entrance (entrance bottom = 104)
-    local copy1 = "Copyright 1981"
-    local copy2 = "Atari"
-    print(copy1, (128 - #copy1 * 4) \ 2, 105, BLACK)
-    print(copy2,  (128 - #copy2 * 4) \ 2, 112, BLACK)
+    print("cOPYRIGHT 1981 aTARI", 24, 105, BLACK)
 
     -- "press X to start" blink and version
     if self.blink_timer % 30 < 20 then

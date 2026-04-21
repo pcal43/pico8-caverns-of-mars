@@ -2,29 +2,43 @@
 -- Global constants – all tunable gameplay values
 -- =============================================
 
-CART_ID = "caverns-of-mars"
+
+
+--[[const]] CART_ID            = "caverns-of-mars"
+--[[const]] FPS                = 60
+
+--[[const]] INVULNERABILITY    = true
 
 -- ship sprite (16x8px)
---[[const]] SPRITE_FLAG        = 1 -- cavern number indicator (8x8)
---[[const]] SPRITE_PLAYER_SHIP = 3
 --[[const]] SHIP_WIDTH         = 16   -- sprite width in pixels
 --[[const]] SHIP_HEIGHT        = 8   -- sprite height in pixels
 --[[const]] SHIP_SPR_W         = 2    -- cells wide passed to spr() (4×8 = 32 ≥ 26)
 --[[const]] SHIP_SPR_H         = 1    -- cells tall passed to spr() (2×8 = 16 ≥ 13)
 
 
---[[const]] SPRITE_ROCKET       = 16 -- (8x8)
---[[const]] SPRITE_RADAR        = 17 -- (8x8)
---[[const]] SPRITE_FUEL_TANK    = 18 -- (16x8)
 --[[const]] SPRITE_FUEL_ROCKET  = 20 -- (16x8)
 --[[const]] SPRITE_FUEL_ROCKET2 = 22 -- (16x8)
 
 
---[[const]] SPRITE_BASE_BRICK = 32 -- (8x8)
---[[const]] SPRITE_BASE_LIGHT = 33 -- (8x8)
---[[const]] SPRITE_BASE_BRICK_LEFT = 34 -- (8x8)
---[[const]] SPRITE_BASE_BRICK_RIGHT = 35 -- (8x8)
+--[[const]] SPRITE_PLAYER_SHIP    = 26
+--[[const]] SPRITE_SHIP_EXPLOSION = 28  -- 16x8 explosion sprite drawn during death pause
+--[[const]] SPRITE_LIFE_REMAINING = 30 -- (8x8)
+--[[const]] SPRITE_FLAG           = 31 -- cavern number indicator (8x8)
 
+
+
+--[[const]] SPRITE_WALL                 = 1
+--[[const]] SPRITE_CORNER_LOWER_RIGHT   = 2
+--[[const]] SPRITE_CORNER_LOWER_LEFT    = 3
+--[[const]] SPRITE_CORNER_UPPER_RIGHT   = 4
+--[[const]] SPRITE_CORNER_UPPER_LEFT    = 5
+--[[const]] SPRITE_ROCKET               = 6
+--[[const]] SPRITE_RADAR                = 7
+--[[const]] SPRITE_FUEL_TANK            = 8
+--[[const]] SPRITE_BASE_BRICK           = 10
+--[[const]] SPRITE_BASE_LIGHT           = 11
+--[[const]] SPRITE_BASE_BRICK_LEFT      = 12
+--[[const]] SPRITE_BASE_BRICK_RIGHT     = 13
 
 
 --[[const]] SPRITE_EXPLOSION = { 128, 130, 132, 134, 136, 138, 140, 142 } -- (16x16)
@@ -38,6 +52,8 @@ CART_ID = "caverns-of-mars"
 --[[const]] SOUND_HUM_LAST = 20
 --[[const]] SOUND_ALARM_CHANNEL = 3
 --[[const]] SOUND_ALARM = 5
+
+--[[const]] TILE_OUTLINE_COLOR = BLUE
 
 
 -- Probe offsets from ship top-left, chosen to match the visual silhouette.
@@ -55,9 +71,16 @@ local SHIP_PROBES = {
 
 -- returns true if sprite id s is a square landscape tile (used for outline rendering)
 function is_square_tile(s)
-    return s==32 or s==33 or s==48 
+    return s==32 or s==33 or s==SPRITE_WALL 
 end
---[[const]] TILE_OUTLINE_COLOR = BLUE
+
+function is_target_tile(s)
+    return s == SPRITE_ROCKET or s == SPRITE_RADAR or s == SPRITE_FUEL_TANK
+end
+
+function is_reactor_tile(s)
+    return s==46 or s==47 or s==62 or s==63
+end
 
 -- Draw a sprite with a 1px black outline by rendering it four times (offset ±1 in
 -- each cardinal direction) with all colours remapped to BLACK, then once normally.
@@ -73,20 +96,6 @@ function spr_outlined(s, x, y, w, h)
 end
 
 
-function is_target_tile(s)
-    return s>=16 and s <= 20
-end
-
-function is_reactor_tile(s)
-    return s==46 or s==47 or s==62 or s==63
-end
-
-ESCAPE_TRIGGER_TEXT = "........enemy destroyed........bomb timer set........escape time "
-
---[[const]] ESCAPE_SCROLL_SPEED = 1   -- px/frame for reverse escape scroll (same as normal)
-
-
---[[const]] SPRITE_LIFE_REMAINING = 2 -- (8x8)
 
 
 --[[const]] SCORE_FUEL_TANK    = 150
@@ -97,10 +106,7 @@ ESCAPE_TRIGGER_TEXT = "........enemy destroyed........bomb timer set........esca
 --[[const]] SCORE_WAVE_FUEL    = 150   -- SPRITE_FUEL_ROCKET in a missile wave
 --[[const]] SCORE_PER_ROW      = 10    -- points awarded per 8px row descended
 
-HIGH_SCORE = 0   -- loaded from cartdata in _init(); 0 until then
-DIFFICULTY  = 1  -- difficulty level
-CURRENT_CAVERN = 1  -- which cavern the player is about to enter
---[[const]] NUM_CAVERNS = 5  -- total number of caverns; after the last, return to title
+--[[const]] NUM_CAVERNS        = 5     -- total number of caverns; after the last, return to title
 
 -- player lives
 --[[const]] PLAYER_LIVES       = 5     -- starting lives
@@ -109,20 +115,20 @@ CURRENT_CAVERN = 1  -- which cavern the player is about to enter
 --[[const]] FUEL_PICKUP_AMT    = 10    -- fuel restored when a fuel tank or fuel rocket is destroyed
 
 -- ship destruction
---[[const]] SPRITE_SHIP_EXPLOSION = 5  -- 16x8 explosion sprite drawn during death pause
---[[const]] DEATH_PAUSE_FRAMES = 30   -- frames to show explosion before respawn/game-over (~5s at 60fps)
+
+--[[const]] DEATH_PAUSE_FRAMES   = 1 * FPS  -- frames to show explosion before respawn/game-over (~5s at 60fps)
 
 -- player starting position (top-left of sprite, horizontally centred)
 --[[const]] PLAYER_START_X     = (128 - SHIP_WIDTH) \ 2
 --[[const]] PLAYER_START_Y     = 10
 
--- dpad movement speed (pixels per frame)
---[[const]] PLAYER_SPEED_X     = 2
---[[const]] PLAYER_SPEED_Y     = 1
+--[[const]] DESCENT_SPEED_FACTOR = 1
+--[[const]] ESCAPE_SPEED_FACTOR  = 1.5
 
--- bullets: speed (pixels/frame downward) and fire-rate cooldown (frames)
---[[const]] BULLET_SPEED       = 4
---[[const]] FIRE_COOLDOWN      = 15
+-- dpad movement speed (pixels per frame)
+--[[const]] PLAYER_SPEED_X     = 60 / FPS -- pixels-per-frame
+--[[const]] PLAYER_SPEED_Y     = 30 / FPS     -- pixels-per-frame
+--[[const]] BULLET_SPEED       = 120 / FPS    -- pixels-per-frame
 
 -- bullet spawn offsets from ship top-left corner
 -- left  gun → ship's left  pixel edge
@@ -132,48 +138,16 @@ CURRENT_CAVERN = 1  -- which cavern the player is about to enter
 --[[const]] BULLET_RIGHT_X     = SHIP_WIDTH  - 1
 --[[const]] BULLET_SPAWN_Y     = SHIP_HEIGHT - 1
 
+
+
 -- scrolling cavern terrain
---[[const]] SCROLL_SPEED       = 1     -- world pixels scrolled upward per frame
+--[[const]] SCROLL_SPEED             = 30 / FPS       -- cavern scroll speed in pixels-per-frame
+--[[const]] ROCKET_WAVE_SCROLL_SPEED = 90 / FPS  -- rocket wave scroll speed (3× normal)
+--[[const]] ROCKET_WAVE_SPACING      = 12        -- virtual pixels between successive rocket spawns
+
 --[[const]] TERRAIN_SLICES     = 145   -- slices buffered (must be > 128)
---[[const]] WALL_COLOR         = DARK_PURPLE  -- rock fill colour
---[[const]] WALL_EDGE_COLOR    = BLUE          -- one-pixel highlight on tunnel edges
+--[[const]] WALL_EDGE_COLOR    = BLUE         -- one-pixel highlight on tunnel edges
 
--- shaft-and-ledge terrain generator
--- Default shaft: both walls are straight vertical lines WALL_INSET px from each screen edge.
--- Ledges alternate left/right. Each ledge has LEDGE_PAD_COUNT horizontal pads separated
--- by rough diagonal ramps, then a sheer face and a single underhang row.
--- Targets are always placed at the midpoint of each pad.
---[[const]] WALL_INSET         = 8     -- default inset of each wall from the screen edge (px)
---[[const]] SHAFT_H_MIN        = 20    -- min rows of straight shaft between ledge sections
---[[const]] SHAFT_H_MAX        = 70    -- max rows of straight shaft between ledge sections
---[[const]] SHAFT_DEFAULT_RATE = 128   -- default wall movement rate (px/row); ≥ screen width = instant arrival
--- ledge geometry (tuning these shapes the look of each ledge)
---[[const]] LEDGE_DIAG_H       = 8     -- rows per diagonal ramp section
---[[const]] LEDGE_DIAG_STEP    = 8     -- pixels the wall moves during the diagonal (gentle slope)
---[[const]] LEDGE_PAD_W        = 18    -- pixels of abrupt horizontal jump INTO each pad (the visible step lip)
---[[const]] LEDGE_PAD_H        = 0     -- rows of vertical face below each step lip
--- per step: the wall advances LEDGE_DIAG_STEP during the ramp + LEDGE_PAD_W at the step lip
--- total displacement = PAD_COUNT*(DIAG_STEP+PAD_W) + DIAG_STEP = 3*20+4 = 64px with defaults
--- minimum corridor after face = (128-2*WALL_INSET) - 64 = 32px = CORR_MIN_W (safe)
---[[const]] LEDGE_PAD_COUNT    = 3     -- pads per ledge (= 3 target shelves per side)
---[[const]] LEDGE_FACE_H       = 16    -- rows for the sheer vertical face after last pad
--- diagonal roughness (flat pads and default shaft are always perfectly straight)
---[[const]] LEDGE_JAGGY_AMT    = 2     -- ±pixel roughness applied only to ramp phases
---[[const]] CORR_MIN_W         = 24    -- minimum open corridor width (safety clamp)
-
--- player collision
---[[const]] PLAYER_COLL_PAD    = 0     -- shrink player hitbox by this many px per side
-
--- section-based target placement
--- Three targets are always placed at the mid-row of every horizontal pad in a ledge.
--- Left-ledge pads: targets cluster near the left (ledge) wall.
--- Right-ledge pads: targets cluster near the right (ledge) wall.
--- TARGET_WALL_MARGIN keeps targets clear of wall edges.
---[[const]] TARGET_COUNT       = 1       -- one target per pad, centred on the step surface
---[[const]] TARGET_SPACING     = 20      -- pixels between target sprite centres
---[[const]] TARGET_HIT_R       = 5       -- bullet collision radius (pixels)
---[[const]] TARGET_WALL_MARGIN = 10      -- min px from ledge wall to outermost target
--- target type ids (mapped to sprites below)
 --[[const]] TTYPE_FUEL         = 1       -- SPRITE_FUEL_TANK  (16×8)
 --[[const]] TTYPE_NODE         = 2       -- SPRITE_RADAR      (8×8)
 --[[const]] TTYPE_ROCKET       = 3       -- SPRITE_ROCKET     (8×8)
@@ -183,11 +157,7 @@ CURRENT_CAVERN = 1  -- which cavern the player is about to enter
 --[[const]] TARGET_SPR_OY      = 7       -- spr() Y draw offset: bottom-aligns sprite to step surface
 
 -- missile wave sections
---[[const]] MISSILE_WAVE_SPACING = 9     -- world rows between consecutive wave entries
 --[[const]] TTYPE_WAVE           = 4     -- wave target; uses tgt.wave_spr / tgt.wave_spr_w directly
---[[const]] WAVE_DRAW_LEAD       = 8     -- rows below screen where wave sprites begin rendering (scroll-in effect)
---[[const]] WAVE_MISSILE_SPEED   = SCROLL_SPEED  -- extra world-rows/frame wave missiles travel toward the player
-                                                  -- (screen speed = SCROLL_SPEED + WAVE_MISSILE_SPEED = 2×)
 
 -- status bar (bottom of screen)
 -- The bottom STATUS_BAR_H pixels are reserved; all gameplay drawing is clipped above GAMEPLAY_H.
@@ -200,3 +170,22 @@ CURRENT_CAVERN = 1  -- which cavern the player is about to enter
 -- score / fuel text
 --[[const]] STATUS_FUEL_Y       = GAMEPLAY_H + 2  -- y of fuel line (top row)
 --[[const]] STATUS_SCORE_Y      = GAMEPLAY_H + 9  -- y of score line (bottom row, left-aligned)
+
+
+--[[const]] TICKER_SPEED = 60 / FPS
+
+--[[const]] ROW_HEIGHT = 8 -- height of each cavern row, in pixels
+
+
+
+
+-- mutable global state
+
+-- Player movement and scrolling are faster during escape than 
+-- during descent.  Track if globally so transition screens can
+-- also reflect it.
+speedFactor = DESCENT_SPEED_FACTOR
+score  = 0
+highScore = 0   -- loaded from cartdata in _init(); 0 until then
+difficulty  = 1  -- difficulty level
+currentCavern = 1  -- which cavern the player is about to enter

@@ -11,16 +11,14 @@ local STATE_CRASHED  = 3   -- game over (no lives left)
 local STATE_ESCAPE   = 4   -- reactor hit; ticker intro playing
 local STATE_ESCAPING = 5   -- active reverse scroll; player must reach level top
 local STATE_ESCAPE_FLY_OFF = 6  -- terrain stopped; ship flies off top of screen
+local STATE_ROCKET_WAVE    = 7  -- rocket wave: rockets fly at player from below
+
 
 -- score awarded per target ttype; TTYPE_WAVE entries are keyed by wave_spr
 local SCORE_BY_TTYPE = {
     [TTYPE_FUEL]   = SCORE_FUEL_TANK,
     [TTYPE_NODE]   = SCORE_RADAR,
     [TTYPE_ROCKET] = SCORE_ROCKET,
-}
-local SCORE_BY_WAVE_SPR = {
-    [SPRITE_ROCKET]      = SCORE_WAVE_ROCKET,
-    [SPRITE_FUEL_ROCKET] = SCORE_WAVE_FUEL,
 }
 
 GameScreen = {}
@@ -41,7 +39,6 @@ function GameScreen:init()
     self.hum_snd    = -1
     self.state  = STATE_PLAYING
     self.lives  = PLAYER_LIVES
-    self.score  = 0
     self.bullets    = {}
     self.targets    = {}   -- alive target objects placed by section rules
     self.explosions = {}   -- active target explosion animations
@@ -51,27 +48,43 @@ function GameScreen:init()
     self.escape_tick = 0
     self:respawnPlayer()
     self:initTerrain()
+    speedFactor = DESCENT_SPEED_FACTOR
 end
 
 -- Respawn the player in place – called after a death when lives remain.
 function GameScreen:respawn()
     self.bullets    = {}
     self.explosions = {}
-    if self.died_while_escaping then
+    if self.died_while_rocketwave then
+        self:triggerRocketWave()
+        speedFactor = DESCENT_SPEED_FACTOR
+        self:respawnPlayer()
+    elseif self.died_while_escaping then
         -- during escape: checkpoint row sits at the bottom of the screen
         local wy = max(0, self.respawn_wy - GAMEPLAY_H)
         self:resetTerrainAt(wy)
         self:prepareEscapeTargets()
-        self.scroll_multiplier = self.levelDef.escape_speed
+
         self.escapeTime  = self.levelDef.escape_time
         self.escape_tick = 0
         self.state = STATE_ESCAPING
+        speedFactor = ESCAPE_SPEED_FACTOR
         self:respawnPlayer()
+        self.player.x = (128 - SHIP_WIDTH) \ 2
         self.player.y = GAMEPLAY_H - SHIP_HEIGHT
+        -- set esc_cp_idx to the checkpoint just before respawn_wy
+        self.esc_cp_idx = 0
+        for i = 1, #self.checkpoints do
+            if self.checkpoints[i] == self.respawn_wy then
+                self.esc_cp_idx = i - 1
+                break
+            end
+        end
     else
         -- during descent: checkpoint row sits at the top of the screen
         self:resetTerrainAt(self.respawn_wy)
         self.state = STATE_PLAYING
+        speedFactor = DESCENT_SPEED_FACTOR
         self:respawnPlayer()
     end
 end
@@ -100,9 +113,9 @@ end
 
 function GameScreen:initTerrain()
     self.scroll_frac     = 0
+    self.reverse_frac    = 0
     self.terrain_base_wy = 0
-    self.terrain         = {}
-    self.levelDef = buildCavern(DIFFICULTY, CURRENT_CAVERN)
+    self.levelDef = buildCavern(difficulty, currentCavern)
     self.level_rows      = self.levelDef.rows
     self:extractTargets()
     -- save pristine target list so resetTerrainAt can restore targets
@@ -118,13 +131,13 @@ function GameScreen:initTerrain()
         add(self.checkpoints, ri * 8)
     end
     self.next_cp_idx = 1
-    -- copy authored speed changes (row index → world-y pixel)
-    self.speed_changes = {}
-    for _, sc in ipairs(self.levelDef.speed_changes) do
-        add(self.speed_changes, { wy = sc.row_idx * 8, mult = sc.mult })
+    self.rw_wave_triggers = {}
+    for _, ri in ipairs(self.levelDef.rocket_waves) do
+        add(self.rw_wave_triggers, ri * 8)
     end
-    self.next_speed_idx   = 1
-    self.scroll_multiplier = 1
+    self.next_rw_idx = 1
+    self.esc_cp_idx  = 0
+    self.terrain = {}
     self.gen = {
         row_idx = 1,   -- index into level_rows (wraps)
         row_py  = 0,   -- pixel y within current authored row (0..7)
@@ -139,6 +152,7 @@ end
 -- Rebuilds level_rows and targets from scratch; preserves checkpoints and scroll_stop_wy.
 function GameScreen:resetTerrainAt(wy)
     self.scroll_frac     = 0
+    self.reverse_frac    = 0
     self.terrain_base_wy = wy
     -- terrain (level_rows, scroll_stop_wy) is immutable — no rebuild needed
     -- targets must be reset so destroyed ones reappear on respawn
@@ -152,13 +166,11 @@ function GameScreen:resetTerrainAt(wy)
           self.checkpoints[self.next_cp_idx] <= wy do
         self.next_cp_idx += 1
     end
-    -- reset speed multiplier and advance past speed changes already behind wy
-    self.scroll_multiplier = 1
-    self.next_speed_idx    = 1
-    while self.next_speed_idx <= #self.speed_changes and
-          self.speed_changes[self.next_speed_idx].wy <= wy do
-        self.scroll_multiplier = self.speed_changes[self.next_speed_idx].mult
-        self.next_speed_idx   += 1
+    -- reset next_rw_idx and advance past wave triggers already behind wy
+    self.next_rw_idx = 1
+    while self.next_rw_idx <= #self.rw_wave_triggers and
+          self.rw_wave_triggers[self.next_rw_idx] <= wy do
+        self.next_rw_idx += 1
     end
     local row_idx = flr(wy / 8) + 1
     self.gen = {
@@ -192,25 +204,27 @@ end
 -- Scroll terrain backwards (level played in reverse: terrain moves DOWN).
 -- Each pixel tick: drop the last (bottom) buffer row, prepend a new row
 -- from level_rows at the top, decrement terrain_base_wy.
+-- Note: scroll_frac is intentionally left at 0 during reverse scroll.
+-- Using it here causes the draw functions to drift terrain upward (wrong
+-- direction), producing a blurry doubled appearance.  reverse_frac tracks
+-- the sub-pixel accumulation for commit rate only.
 function GameScreen:scrollTerrainReverse()
     if self.terrain_base_wy <= 0 then return end
-    self.scroll_frac += ESCAPE_SCROLL_SPEED * self.scroll_multiplier
-    while self.scroll_frac >= 1 do
-        self.scroll_frac     -= 1
+    self.reverse_frac += SCROLL_SPEED * speedFactor
+    while self.reverse_frac >= 1 do
+        self.reverse_frac    -= 1
         self.terrain_base_wy -= 1
-        -- skip over rows excluded from the escape sequence
-        local row_idx = flr(self.terrain_base_wy / 8) + 1
-        for _, range in ipairs(self.levelDef.escape_skip_ranges) do
-            if row_idx >= range.from and row_idx <= range.to then
-                self.terrain_base_wy = (range.from - 1) * 8
-                row_idx = range.from - 1
-                break
-            end
+        -- update escape respawn checkpoint when its row reaches the screen bottom
+        while self.esc_cp_idx >= 1 and
+              self.terrain_base_wy + GAMEPLAY_H <= self.checkpoints[self.esc_cp_idx] do
+            self.respawn_wy = self.checkpoints[self.esc_cp_idx]
+            self.esc_cp_idx -= 1
         end
-        if self.terrain_base_wy % 8 == 0 then
-            self.score += SCORE_PER_ROW
+        local row_idx = flr(self.terrain_base_wy /ROW_HEIGHT) + 1
+        if self.terrain_base_wy % ROW_HEIGHT == 0 then
+            score += SCORE_PER_ROW
         end
-        local phase   = self.terrain_base_wy % 8
+        local phase   = self.terrain_base_wy % ROW_HEIGHT
         local sprites = (row_idx >= 1 and row_idx <= #self.level_rows)
                         and self.level_rows[row_idx] or nil
         deli(self.terrain, #self.terrain)
@@ -226,12 +240,12 @@ end
 -- Stops once the last authored row has reached screen-y 0.
 function GameScreen:scrollTerrain()
     if self.terrain_base_wy >= self.scroll_stop_wy then return end
-    self.scroll_frac += SCROLL_SPEED * self.scroll_multiplier
+    self.scroll_frac += SCROLL_SPEED * speedFactor
     while self.scroll_frac >= 1 do
         self.scroll_frac     -= 1
         self.terrain_base_wy += 1
         if self.terrain_base_wy % 8 == 0 then
-            self.score += SCORE_PER_ROW
+            score += SCORE_PER_ROW
         end
         -- advance the respawn checkpoint when the player's world-y crosses it
         while self.next_cp_idx <= #self.checkpoints and
@@ -239,11 +253,15 @@ function GameScreen:scrollTerrain()
             self.respawn_wy  = self.checkpoints[self.next_cp_idx]
             self.next_cp_idx += 1
         end
-        -- apply speed changes when the row scrolls into view at the bottom
-        while self.next_speed_idx <= #self.speed_changes and
-              self.terrain_base_wy + GAMEPLAY_H >= self.speed_changes[self.next_speed_idx].wy do
-            self.scroll_multiplier = self.speed_changes[self.next_speed_idx].mult
-            self.next_speed_idx   += 1
+        -- trigger rocket wave when trigger row reaches the bottom of the screen
+        while self.next_rw_idx <= #self.rw_wave_triggers and
+              self.terrain_base_wy + GAMEPLAY_H >= self.rw_wave_triggers[self.next_rw_idx] do
+            self:triggerRocketWave()
+            self.next_rw_idx += 1
+        end
+        if self.state == STATE_ROCKET_WAVE then
+            self.scroll_frac = 0
+            break
         end
         deli(self.terrain, 1)
         add(self.terrain, self:nextRowFromGen())
@@ -263,12 +281,18 @@ function GameScreen:rowAt(sy)
     return nil
 end
 
--- Return true if pixel column cx (0-7 within an 8px tile) is solid for sprite sid.
--- Full tiles are always solid; half-bricks only cover their respective 4px.
-local function sid_hits_px(sid, cx)
+-- Return true if pixel (cx, cy) within an 8×8 tile is solid for sprite sid.
+-- cx, cy are 0-7 where (0,0) is the top-left corner of the sprite.
+-- Full tiles are always solid; half-bricks cover their respective 4px column;
+-- corner tiles use diagonal geometry.
+local function is_tile_collision(sid, cx, cy)
     if not sid or sid == 0 then return false end
     if sid == SPRITE_BASE_BRICK_LEFT  then return cx < 4 end
     if sid == SPRITE_BASE_BRICK_RIGHT then return cx >= 4 end
+    if sid == SPRITE_CORNER_LOWER_RIGHT then return cx + cy >= 7 end
+    if sid == SPRITE_CORNER_LOWER_LEFT  then return cx <= cy end
+    if sid == SPRITE_CORNER_UPPER_RIGHT then return cx >= cy end
+    if sid == SPRITE_CORNER_UPPER_LEFT  then return cx + cy <= 7 end
     return true
 end
 
@@ -276,7 +300,7 @@ end
 local function tile_solid(r, px)
     if not r or not r.sprites then return false end
     local sid = r.sprites[flr(px / 8) + 1]
-    return sid_hits_px(sid, px % 8)
+    return is_tile_collision(sid, px % 8, r.spr_phase)
 end
 
 -- =============================================
@@ -287,10 +311,10 @@ end
 -- mid() clamps so the ship never exits the 128×128 screen.
 function GameScreen:movePlayer()
     local p = self.player
-    if btn(BUTTON_LEFT)  then p.x -= PLAYER_SPEED_X end
-    if btn(BUTTON_RIGHT) then p.x += PLAYER_SPEED_X end
-    if btn(BUTTON_UP)    then p.y -= PLAYER_SPEED_Y end
-    if btn(BUTTON_DOWN)  then p.y += PLAYER_SPEED_Y end
+    if btn(BUTTON_LEFT)  then p.x -= PLAYER_SPEED_X * speedFactor end
+    if btn(BUTTON_RIGHT) then p.x += PLAYER_SPEED_X * speedFactor end
+    if btn(BUTTON_UP)    then p.y -= PLAYER_SPEED_Y * speedFactor end
+    if btn(BUTTON_DOWN)  then p.y += PLAYER_SPEED_Y * speedFactor end
     p.x = mid(0, p.x, 128 - SHIP_WIDTH)
     p.y = mid(0, p.y, GAMEPLAY_H - SHIP_HEIGHT)
 end
@@ -307,38 +331,52 @@ function GameScreen:handleShooting()
     end
 end
 
--- =============================================
--- Bullet update
-
 -- Spawn a target explosion at the given world position.
-local function spawn_explosion(explosions, x, world_y)
-    add(explosions, { x=x, world_y=world_y })
+local function spawn_explosion(explosions, x, world_y, vy)
+    add(explosions, { x=x, world_y=world_y, vy=vy or 0 })
     sfx(SOUND_EXPLOSION, SOUND_EXPLOSION_CHANNEL)
 end
--- =============================================
--- Bullets travel downward. Destroyed on hitting a solid tile.
+
 function GameScreen:updateBullets()
     local live = {}
     local bwy = self.terrain_base_wy
     local sf  = self.scroll_frac
+    local is_wave = self.state == STATE_ROCKET_WAVE
     for b in all(self.bullets) do
         b.y += BULLET_SPEED
-        if b.y < GAMEPLAY_H and not tile_solid(self:rowAt(b.y), b.x) then
+        if b.y < GAMEPLAY_H and (is_wave or not tile_solid(self:rowAt(b.y), b.x)) then
             local hit = false
-            for tgt in all(self.targets) do
-                if tgt.alive then
-                    local tsy = flr((tgt.world_y - bwy) - sf)
-                    local hw  = tgt.spr_w == 2 and TARGET_SPR_OX_LG or TARGET_SPR_OX_SM
-                    if b.x >= tgt.x - hw and b.x <= tgt.x + hw - 1
-                    and b.y >= tsy - TARGET_SPR_OY and b.y <= tsy then
-                        tgt.alive  = false
-                        self.score += SCORE_BY_TTYPE[tgt.ttype] or 0
-                        if tgt.ttype == TTYPE_FUEL then
+            if is_wave then
+                for tgt in all(self.rw_targets) do
+                    if tgt.alive and b.x >= tgt.x and b.x < tgt.x + tgt.spr_w * 8
+                    and b.y >= tgt.y and b.y < tgt.y + 8 then
+                        tgt.alive = false
+                        local s = tgt.spr == SPRITE_FUEL_ROCKET and SCORE_WAVE_FUEL or SCORE_WAVE_ROCKET
+                        score += s
+                        if tgt.spr == SPRITE_FUEL_ROCKET then
                             self.fuel = mid(0, self.fuel + 25, PLAYER_FUEL_MAX)
                         end
-                        spawn_explosion(self.explosions, tgt.x, tgt.world_y)
+                        spawn_explosion(self.explosions, tgt.x + tgt.spr_w * 4, tgt.y + bwy, ROCKET_WAVE_SCROLL_SPEED)
                         hit = true
                         break
+                    end
+                end
+            else
+                for tgt in all(self.targets) do
+                    if tgt.alive then
+                        local tsy = flr((tgt.world_y - bwy) - sf)
+                        local hw  = tgt.spr_w == 2 and TARGET_SPR_OX_LG or TARGET_SPR_OX_SM
+                        if b.x >= tgt.x - hw and b.x <= tgt.x + hw - 1
+                        and b.y >= tsy - TARGET_SPR_OY and b.y <= tsy then
+                            tgt.alive  = false
+                            score += SCORE_BY_TTYPE[tgt.ttype] or 0
+                            if tgt.ttype == TTYPE_FUEL then
+                                self.fuel = mid(0, self.fuel + 25, PLAYER_FUEL_MAX)
+                            end
+                            spawn_explosion(self.explosions, tgt.x, tgt.world_y)
+                            hit = true
+                            break
+                        end
                     end
                 end
             end
@@ -357,9 +395,9 @@ function GameScreen:extractTargets()
             local s = row[j]
             if s and is_target_tile(s) and s != 19 and s != 21 then
                 local ttype, spr_w
-                if     s == 16 then ttype = TTYPE_ROCKET ; spr_w = 1
-                elseif s == 17 then ttype = TTYPE_NODE   ; spr_w = 1
-                elseif s == 18 or s == 20 then ttype = TTYPE_FUEL ; spr_w = 2
+                if     s == SPRITE_ROCKET then ttype = TTYPE_ROCKET ; spr_w = 1
+                elseif s == SPRITE_RADAR then ttype = TTYPE_NODE   ; spr_w = 1
+                elseif s == SPRITE_FUEL_TANK then ttype = TTYPE_FUEL ; spr_w = 2
                 end
                 if ttype then
                     local hw = spr_w == 2 and TARGET_SPR_OX_LG or TARGET_SPR_OX_SM
@@ -391,7 +429,8 @@ function GameScreen:updateEngineHum()
     if self.state == STATE_PLAYING
     or self.state == STATE_ESCAPE
     or self.state == STATE_ESCAPING
-    or self.state == STATE_ESCAPE_FLY_OFF then
+    or self.state == STATE_ESCAPE_FLY_OFF
+    or self.state == STATE_ROCKET_WAVE then
         -- divide GAMEPLAY_H into equal bands; clamp ship y to [0, GAMEPLAY_H-1]
         local band = flr(mid(0, self.player.y, GAMEPLAY_H - 1) / GAMEPLAY_H * num_sounds)
         local snd  = SOUND_HUM_FIRST + band
@@ -416,7 +455,7 @@ function GameScreen:checkPlayerCollision()
         local r  = self:rowAt(sy)
         if r and r.sprites then
             local sid = r.sprites[flr(sx / 8) + 1]
-            if sid_hits_px(sid, sx % 8) then
+            if is_tile_collision(sid, sx % 8, r.spr_phase) then
                 if is_reactor_tile(sid) and self.state == STATE_PLAYING then
                     self:triggerEscape()
                 elseif not is_reactor_tile(sid) then
@@ -434,10 +473,10 @@ end
 -- via TARGET_SPR_OY so the sprite occupies rows [tsy-TARGET_SPR_OY .. tsy].
 function GameScreen:checkTargetCollision()
     local p   = self.player
-    local sx1 = p.x + PLAYER_COLL_PAD
-    local sx2 = p.x + SHIP_WIDTH  - 1 - PLAYER_COLL_PAD
-    local sy1 = p.y + PLAYER_COLL_PAD
-    local sy2 = p.y + SHIP_HEIGHT - 1 - PLAYER_COLL_PAD
+    local sx1 = p.x
+    local sx2 = p.x + SHIP_WIDTH  - 1
+    local sy1 = p.y
+    local sy2 = p.y + SHIP_HEIGHT - 1
     local bwy = self.terrain_base_wy
     local sf  = self.scroll_frac
     for tgt in all(self.targets) do
@@ -487,18 +526,26 @@ end
 -- Actual respawn or game-over is deferred until the animation timer expires.
 function GameScreen:shipDestroyed()
     sfx(SOUND_EXPLOSION, SOUND_EXPLOSION_CHANNEL)
-    self.lives -= 1
-    self.death_x            = self.player.x
-    self.death_y            = self.player.y
-    self.death_timer        = DEATH_PAUSE_FRAMES
-    self.died_while_escaping = (self.state == STATE_ESCAPING)
-    self.state              = STATE_DYING
+    if not INVULNERABILITY then
+        self.lives -= 1
+        self.death_x            = self.player.x
+        self.death_y            = self.player.y
+        self.death_timer        = DEATH_PAUSE_FRAMES
+        self.died_while_escaping   = (self.state == STATE_ESCAPING)
+        self.died_while_rocketwave = (self.state == STATE_ROCKET_WAVE)
+        self.state              = STATE_DYING
+    end
 end
 
 -- Reactor collision: freeze scrolling and input, begin escape sequence.
 function GameScreen:triggerEscape()
-    self.state = STATE_ESCAPE
-    self.scroll_multiplier = self.levelDef.escape_speed
+    self.state        = STATE_ESCAPE
+    -- scroll_frac is intentionally NOT zeroed here. Zeroing it causes an
+    -- abrupt 1-row rendering shift (buffer row 1 jumps to screen y=0) which
+    -- produces an intermittent black line depending on t[1].spr_phase.
+    -- scrollTerrainReverse uses reverse_frac exclusively, so scroll_frac can
+    -- safely remain at its current sub-pixel value throughout the escape.
+    self.reverse_frac = 0
     self.ticker_msgs = {
         "enemy destroyed",
         "bomb timer set",
@@ -508,6 +555,100 @@ function GameScreen:triggerEscape()
     self.ticker_x     = 128
     self.ticker_hold  = 0
     sfx(SOUND_ALARM, SOUND_ALARM_CHANNEL, 0, -1)
+
+    speedFactor = ESCAPE_SPEED_FACTOR
+end
+
+-- Freeze terrain and begin the rocket wave immediately.
+function GameScreen:triggerRocketWave()
+    self.state         = STATE_ROCKET_WAVE
+    self.rw_scroll     = 0
+    self.rw_wave_idx   = 1
+    self.rw_wave_pass  = 1
+    self.rw_targets    = {}
+    self.rw_next_spawn = ROCKET_WAVE_SPACING
+    self.rw_fuel_frac  = 0
+end
+
+-- Scroll rockets upward, spawn new ones from ROCKET_WAVE, check collisions.
+function GameScreen:updateRocketWave()
+    self.rw_scroll += ROCKET_WAVE_SCROLL_SPEED
+    local advance = flr(self.rw_scroll)
+    self.rw_scroll -= advance
+    -- move all rockets upward
+    for tgt in all(self.rw_targets) do
+        tgt.y -= advance
+    end
+    -- spawn the next entry when enough virtual pixels have traveled
+    self.rw_next_spawn -= advance
+    while self.rw_next_spawn <= 0 and self.rw_wave_idx <= #ROCKET_WAVE do
+        self:spawnRocketWaveTarget(ROCKET_WAVE[self.rw_wave_idx])
+        self.rw_wave_idx   += 1
+        self.rw_next_spawn += ROCKET_WAVE_SPACING
+        if self.rw_wave_idx > #ROCKET_WAVE and self.rw_wave_pass < 2 then
+            self.rw_wave_pass += 1
+            self.rw_wave_idx   = 1
+        end
+    end
+    -- wall collision
+    local p = self.player
+    if p.x < 8 or p.x + SHIP_WIDTH > 120 then
+        self:shipDestroyed()
+        return
+    end
+    -- player vs rocket AABB collision
+    local sx2 = p.x + SHIP_WIDTH  - 1
+    local sy2 = p.y + SHIP_HEIGHT - 1
+    for tgt in all(self.rw_targets) do
+        if tgt.alive
+        and p.x  <= tgt.x + tgt.spr_w * 8 - 1 and sx2 >= tgt.x
+        and p.y  <= tgt.y + 7               and sy2 >= tgt.y then
+            self:shipDestroyed()
+            return
+        end
+    end
+    -- end wave once all rockets spawned and scrolled off the top
+    if self.rw_wave_idx > #ROCKET_WAVE then
+        local any = false
+        for tgt in all(self.rw_targets) do
+            if tgt.alive and tgt.y + 7 >= 0 then any = true; break end
+        end
+        if not any then self.state = STATE_PLAYING end
+    end
+    -- consume fuel at the same rate as descent (terrain is frozen so updateFuel
+    -- can't measure distance; use a virtual pixel accumulator instead)
+    self.rw_fuel_frac += SCROLL_SPEED * speedFactor
+    local burn = flr(self.rw_fuel_frac / FUEL_DESCENT_RATE)
+    if burn > 0 then
+        self.rw_fuel_frac -= burn * FUEL_DESCENT_RATE
+        self.fuel = mid(0, self.fuel - burn, PLAYER_FUEL_MAX)
+        if self.fuel == 0 then
+            self:shipDestroyed()
+            return
+        end
+    end
+end
+
+-- Spawn one ROCKET_WAVE entry at the bottom of the screen.
+-- v > 0 → SPRITE_ROCKET at column v+2 (1-based).
+-- v < 0 → SPRITE_FUEL_ROCKET at column -v+1 (1-based, 2-wide).
+function GameScreen:spawnRocketWaveTarget(v)
+    if v == 0 then return end
+    local x, sprite, spr_w
+    if v > 0 then
+        local j = v + 2
+        if j < 2 or j > 15 then return end
+        x      = (v + 1) * 8
+        sprite = SPRITE_ROCKET
+        spr_w  = 1
+    else
+        local j = -v + 1
+        if j < 2 or j > 14 then return end
+        x      = (-v) * 8
+        sprite = SPRITE_FUEL_ROCKET
+        spr_w  = 2
+    end
+    add(self.rw_targets, { x=x, y=GAMEPLAY_H, spr=sprite, spr_w=spr_w, alive=true })
 end
 
 -- Prepare targets for escape mode:
@@ -553,7 +694,7 @@ function GameScreen:update()
         local msg  = self.ticker_msgs[self.ticker_idx]
         local centre_x = (128 - #msg * 8) \ 2
         if self.ticker_x > centre_x then
-            self.ticker_x = max(centre_x, self.ticker_x - 2)
+            self.ticker_x = max(centre_x, self.ticker_x - TICKER_SPEED)
         else
             self.ticker_hold += 1
             if self.ticker_hold >= 40 then
@@ -563,9 +704,11 @@ function GameScreen:update()
                 if self.ticker_idx > #self.ticker_msgs then
                     -- all messages shown: start escaping
                     sfx(-1, SOUND_ALARM_CHANNEL)
+                    self.hum_snd = -1  -- force updateEngineHum to restart hum immediately
                     self:prepareEscapeTargets()
-                    self.escapeTime = self.levelDef.escape_time
+                    self.escapeTime  = self.levelDef.escape_time
                     self.escape_tick = 0
+                    self.esc_cp_idx  = self.next_cp_idx - 1
                     self.state = STATE_ESCAPING
                 end
             end
@@ -574,7 +717,7 @@ function GameScreen:update()
     elseif self.state == STATE_ESCAPING then
         -- reverse scroll: terrain moves down, player must reach level top
         self.escape_tick += 1
-        if self.escape_tick >= 30 then
+        if self.escape_tick >= FPS then
             self.escape_tick = 0
             self.escapeTime = max(0, self.escapeTime - 1)
         end
@@ -589,26 +732,61 @@ function GameScreen:update()
         self.frame += 1
     elseif self.state == STATE_ESCAPE_FLY_OFF then
         -- terrain is frozen; ship flies straight up until fully off screen
-        self.player.y -= PLAYER_SPEED_Y
+        self.player.y -= PLAYER_SPEED_Y * speedFactor
         if self.player.y + SHIP_HEIGHT <= 0 then
             self.isEscaped = true
             self.isDone    = true
         end
         self.frame += 1
+    elseif self.state == STATE_ROCKET_WAVE then
+        self:movePlayer()
+        self:handleShooting()
+        self:updateBullets()
+        self:updateExplosions()
+        self:updateRocketWave()
+        self.frame += 1
     end
     self:updateEngineHum()
 end
--- =============================================
 
 function GameScreen:draw()
     cls(BLACK)
-    self:drawTerrain()
-    self:drawTileOutlines()
-    self:drawTargets()
+    if self.state == STATE_ROCKET_WAVE
+    or (self.state == STATE_DYING and self.died_while_rocketwave) then
+        self:drawRocketWave()
+    else
+        self:drawTerrain()
+        self:drawTileOutlines()
+        self:drawTargets()
+    end
     self:drawExplosions()
     self:drawBullets()
     self:drawShip()
     self:drawStatusBar()
+end
+
+-- Draw the rocket wave: left/right wall columns and all active rocket targets.
+function GameScreen:drawRocketWave()
+    clip(0, 0, 128, GAMEPLAY_H)
+    local flash = flr(time() * 8)
+    if flash % 2 == 0 then pal(YELLOW, WHITE) end
+    for y = 0, GAMEPLAY_H - 1, 8 do
+        spr(SPRITE_WALL, 0, y)
+        spr(SPRITE_WALL, 120, y)
+    end
+    line(7, 0, 7, GAMEPLAY_H - 1, WALL_EDGE_COLOR)
+    line(120, 0, 120, GAMEPLAY_H - 1, WALL_EDGE_COLOR)
+    for tgt in all(self.rw_targets) do
+        if tgt.alive and tgt.y < GAMEPLAY_H and tgt.y + 7 >= 0 then
+            local draw_spr = tgt.spr
+            if tgt.spr == SPRITE_FUEL_ROCKET and flr(self.frame / 5) % 2 == 1 then
+                draw_spr = SPRITE_FUEL_ROCKET2
+            end
+            spr(draw_spr, tgt.x, tgt.y, tgt.spr_w, 1)
+        end
+    end
+    pal()
+    clip()
 end
 
 -- Advance explosion animations and remove any that have scrolled off the top.
@@ -617,6 +795,7 @@ function GameScreen:updateExplosions()
     local sf   = self.scroll_frac
     local live = {}
     for e in all(self.explosions) do
+        if e.vy ~= 0 then e.world_y -= e.vy end
         local sy = flr((e.world_y - bwy) - sf)
         if sy > -16 then
             add(live, e)
@@ -626,11 +805,12 @@ function GameScreen:updateExplosions()
 end
 
 -- Draw active explosions: 16x16, centered horizontally, bottom-aligned to target.
--- All explosions share the same animation frame (global self.frame % 15 ping-pong).
+-- All explosions share the same animation frame, normalised to 30fps so the
+-- animation speed is unchanged when FPS changes.
 function GameScreen:drawExplosions()
     local bwy = self.terrain_base_wy
     local sf  = self.scroll_frac
-    local pos = self.frame % 15
+    local pos = flr(self.frame * 30 / FPS) % 15
     local fi  = pos < 8 and pos + 1 or 15 - pos + 1
     local s   = SPRITE_EXPLOSION[fi]
     for e in all(self.explosions) do
@@ -784,10 +964,15 @@ function GameScreen:drawStatusBar()
             STATUS_LIFE_SPR_Y)
     end
 
+    local score_str = "SCORE:" .. score
+    print(score_str, (128 - #score_str * 4) \ 2, STATUS_SCORE_Y, BLACK)
+    -- cavern number: flag icons right-aligned on bottom row
+    for i = 1, currentCavern - 1 do
+        spr(SPRITE_FLAG, 127 - i * 6, STATUS_LIFE_SPR_Y)
+    end
+
     if self.state == STATE_ESCAPE then
         -- ticker: show current message, hide fuel, keep score
-        local score_str = "SCORE:" .. self.score
-        print(score_str, (128 - #score_str * 4) \ 2, STATUS_SCORE_Y, BLACK)
         if self.ticker_msgs then
             local msg = self.ticker_msgs[self.ticker_idx]
             if msg then
@@ -796,25 +981,12 @@ function GameScreen:drawStatusBar()
         end
     elseif self.state == STATE_ESCAPING or self.state == STATE_ESCAPE_FLY_OFF then
         -- keep "escape time N" centred and live during the escape
-        local score_str = "SCORE:" .. self.score
-        print(score_str, (128 - #score_str * 4) \ 2, STATUS_SCORE_Y, BLACK)
         local cdown = "escape time "..self.escapeTime
         print("\^w"..cdown, (128 - #cdown * 8) \ 2, STATUS_FUEL_Y, BLACK)
     else
         -- fuel centred on top row; score centred on bottom row
-        local score_str = "SCORE:" .. self.score
         local fuel_str  = "FUEL:"  .. self.fuel
-        print(score_str, (128 - #score_str * 4) \ 2, STATUS_SCORE_Y, BLACK)
         print(fuel_str,  (128 - #fuel_str  * 4) \ 2, STATUS_FUEL_Y,  BLACK)
     end
-    -- cavern number: flag icons right-aligned on bottom row
-    for i = 1, CURRENT_CAVERN - 1 do
-        spr(SPRITE_FLAG, 127 - i * 8, STATUS_LIFE_SPR_Y)
-    end
-end
-
-function GameScreen:drawCrashedOverlay()    rectfill(28, 54, 99, 72, BLACK)
-    print("crashed!", 37, 57, RED)
-    print("press x to retry", 30, 64, LIGHT_GRAY)
 end
 

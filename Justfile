@@ -3,6 +3,7 @@ set dotenv-load
 set export
 
 PROJECT_NAME := env("PROJECT_NAME")
+MINIFY_OPTS := env("MINIFY_OPTS")
 VERSION := env("VERSION")
 ROOT_DIR := "."
 BUILD_DIR := ROOT_DIR + "/build"
@@ -13,8 +14,9 @@ GAME_ROOT := PICO8_CARTS + "/" + PROJECT_NAME
 GAME_CART := GAME_ROOT + "/" + PROJECT_NAME + ".p8"
 
 SHRINKO8 := "python3 ../shrinko8/shrinko8.py"
-MINIFIED_CART := BUILD_DIR + "/" + PROJECT_NAME + "-min.p8"
+MINIFIED_CART := BUILD_DIR + "/" + PROJECT_NAME + "-minified.p8"
 RELEASE_ARTIFACT := BUILD_DIR + "/" + PROJECT_NAME + "-" + VERSION + ".p8.png"
+
 
 UNAME_S := `uname -s`
 PICO8_BIN := if UNAME_S == "Darwin" {
@@ -26,39 +28,31 @@ PICO8_BIN := if UNAME_S == "Darwin" {
 clean:
     rm -rf "$BUILD_DIR"
 
-run:
-	"$PICO8_BIN" -home "$PICO8_HOME"  -root_path  "$PICO8_CARTS" -run "$GAME_CART"
-
 version:
     mkdir -p "$GAME_ROOT"
     echo 'VERSION = "'"$VERSION"'"' > "$GAME_ROOT/version.lua"
 
-release: clean version
-    mkdir -p "$BUILD_DIR"
-    "$PICO8_BIN" \
-        -home "$PICO8_HOME" \
-        -root_path "$PICO8_CARTS" \
-        -run "$GAME_CART" \
-        -export "$RELEASE_ARTIFACT"
-
-count: release
-    $SHRINKO8 "$RELEASE_ARTIFACT" --count
-
-lint: release
-    $SHRINKO8 "$GAME_CART" --lint
-
 minify:
     mkdir -p "$BUILD_DIR"
-    $SHRINKO8 "$GAME_CART" "$MINIFIED_CART" --minify --no-minify-lines
+    {{SHRINKO8}} "{{GAME_CART}}" "{{MINIFIED_CART}}" --minify {{MINIFY_OPTS}}    
+
+release: clean version minify
+    {{PICO8_BIN}} -export "$RELEASE_ARTIFACT" "{{MINIFIED_CART}}"
+
+lint:
+    {{SHRINKO8}} "{{GAME_CART}}" --lint
+
+count:
+    {{SHRINKO8}} "{{GAME_CART}}" --count
 
 count-minified: minify
-    $SHRINKO8 "$MINIFIED_CART" --count
+    {{SHRINKO8}} "{{MINIFIED_CART}}" --count
 
-run-minified: minify
-    "$PICO8_BIN" \
-        -home "$PICO8_HOME" \
-        -root_path "$PICO8_CARTS" \
-        -run "$MINIFIED_CART"
+count-release: release
+    {{SHRINKO8}} "{{RELEASE_ARTIFACT}}" --count
+
+run:
+	"$PICO8_BIN" -home "$PICO8_HOME"  -root_path  "$PICO8_CARTS" -run "$GAME_CART"
 
 run-release: release
     "$PICO8_BIN" -run "$RELEASE_ARTIFACT"

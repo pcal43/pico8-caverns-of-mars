@@ -6,14 +6,15 @@ local flow = nil
 
 function _init()
 	cartdata(CART_ID)
-	HIGH_SCORE = dget(0)
+	highScore = dget(0)
 	flow = cocreate(function()
 		while true do
-			CURRENT_CAVERN = 1
+			currentCavern = 1
 			currentScreen = TitleScreen.new()
 			while not currentScreen.isDone do
 				yield()
 			end
+			score = 0
 			local keep_playing = true
 			while keep_playing do
 				currentScreen = CavernDescentScreen.new()
@@ -25,7 +26,7 @@ function _init()
 					yield()
 				end
 				if currentScreen.isGameOver then
-					currentScreen = GameOverScreen.new(currentScreen.score)
+					currentScreen = GameOverScreen.new(score)
 					while not currentScreen.isDone do
 						yield()
 					end
@@ -35,7 +36,7 @@ function _init()
 					while not currentScreen.isDone do
 						yield()
 					end
-					if CURRENT_CAVERN > NUM_CAVERNS then
+					if currentCavern > NUM_CAVERNS then
 						keep_playing = false
 					end
 				end
@@ -44,7 +45,7 @@ function _init()
 	end)	
 end
 
-function _update()
+function _update60()
 	if (currentScreen) currentScreen:update()
 	assert(coresume(flow))
 end

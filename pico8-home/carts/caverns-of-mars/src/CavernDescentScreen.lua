@@ -10,7 +10,7 @@ CavernDescentScreen.new = function()
 end
 
 function CavernDescentScreen:update()
-    self.ship_y += 1
+    self.ship_y += PLAYER_SPEED_Y
     if self.ship_y >= MARTIAN_CAVERN_LIP + 4 then
         sfx(-1, SOUND_HUM_CHANNEL)
         self.isDone = true

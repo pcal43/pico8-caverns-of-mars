@@ -1,3 +1,3 @@
-# pico8-template
+# Caverns of Mars - pico8 demake
 
-Project template for bootstrapping pico8 game development.
+<img src="etc/title-screen.png" width="512" height="512">
