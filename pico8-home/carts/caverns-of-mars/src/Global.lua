@@ -70,7 +70,7 @@ local SHIP_PROBES = {
 
 -- returns true if sprite id s is a square landscape tile (used for outline rendering)
 function is_square_tile(s)
-    return s==32 or s==33 or s==SPRITE_WALL 
+    return s==SPRITE_BASE_BRICK or s==SPRITE_BASE_LIGHT or s==SPRITE_WALL 
 end
 
 function is_target_tile(s)
