@@ -1,8 +1,6 @@
 local GameOverScreen = {}
 
-local DELAY_FRAMES  = 90   -- 3 seconds at 30fps before prompt appears
-local BLINK_ON      = 20   -- frames prompt is visible per blink cycle
-local BLINK_PERIOD  = 30   -- total frames per blink cycle
+--[[const]] local DELAY_FRAMES  = 3 * FPS
 
 GameOverScreen.new = function()
     local self = {}
@@ -25,20 +23,13 @@ end
 
 function GameOverScreen:draw()
     cls(BLACK)
-
-    -- GAME OVER
-    local go = "game over"
-    print("\^w"..go, (128 - #go * 8) \ 2, 32, WHITE)
-
-    -- scores
-    local sc_str = "your score  "..score
-    local hi_str = "high score  "..highScore
-    print(sc_str, (128 - #sc_str * 4) \ 2, 50, WHITE)
-    print(hi_str, (128 - #hi_str * 4) \ 2, 60, WHITE)
+    print("\^wgame over", 28, 32, WHITE)
+    print("your score  "..score, 32, 50, WHITE)
+    print("high score  "..highScore, 32, 60, WHITE)
 
     -- flashing prompt after delay
     if self.blink_timer > DELAY_FRAMES then
-        if self.blink_timer % BLINK_PERIOD < BLINK_ON then
+        if self.blink_timer % FPS > (FPS/3) then
             local p = "press ❎ to continue"
             print(p, (128 - #p * 4) \ 2, 112, WHITE)
         end

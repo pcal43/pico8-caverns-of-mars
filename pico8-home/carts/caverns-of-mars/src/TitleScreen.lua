@@ -60,7 +60,7 @@ function TitleScreen:draw()
     print("cOPYRIGHT 1981 aTARI", 24, 105, BLACK)
 
     -- "press X to start" blink and version
-    if self.blink_timer % 30 < 20 then
+    if self.blink_timer % FPS > (FPS/3) then
         print("press ❎ to start", 30, 121, BLACK)
     end
     print("pcal", 1, 80, DARK_GRAY)
