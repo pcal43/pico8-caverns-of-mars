@@ -190,7 +190,7 @@ EASY_BASE_SECTION = {
 
 -- Builds the gameplay Level.  outputRows must be an array; after the function returns,
 -- it will contain 16-element arrays for each row in the level.
-function buildCavern(_, cavern) 
+function buildCavern(_, _) 
     local level = {
         rows = {},
         checkpoints = {},

@@ -4,10 +4,9 @@ local DELAY_FRAMES  = 90   -- 3 seconds at 30fps before prompt appears
 local BLINK_ON      = 20   -- frames prompt is visible per blink cycle
 local BLINK_PERIOD  = 30   -- total frames per blink cycle
 
-GameOverScreen.new = function(score)
+GameOverScreen.new = function()
     local self = {}
     self.isDone      = false
-    self.score       = score
     self.blink_timer = 0
     if score > highScore then
         highScore = score

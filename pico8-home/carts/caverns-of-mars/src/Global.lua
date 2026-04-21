@@ -4,20 +4,20 @@
 
 
 
---[[const]] CART_ID            = "caverns-of-mars"
---[[const]] FPS                = 60
+--[[const]] CART_ID               = "caverns-of-mars"
+--[[const]] FPS                   = 60
 
---[[const]] INVULNERABILITY    = true
+--[[const]] INVULNERABILITY       = false
 
 -- ship sprite (16x8px)
---[[const]] SHIP_WIDTH         = 16   -- sprite width in pixels
---[[const]] SHIP_HEIGHT        = 8   -- sprite height in pixels
---[[const]] SHIP_SPR_W         = 2    -- cells wide passed to spr() (4×8 = 32 ≥ 26)
---[[const]] SHIP_SPR_H         = 1    -- cells tall passed to spr() (2×8 = 16 ≥ 13)
+--[[const]] SHIP_WIDTH            = 16   -- sprite width in pixels
+--[[const]] SHIP_HEIGHT           = 8   -- sprite height in pixels
+--[[const]] SHIP_SPR_W            = 2    -- cells wide passed to spr() (4×8 = 32 ≥ 26)
+--[[const]] SHIP_SPR_H            = 1    -- cells tall passed to spr() (2×8 = 16 ≥ 13)
 
 
---[[const]] SPRITE_FUEL_ROCKET  = 20 -- (16x8)
---[[const]] SPRITE_FUEL_ROCKET2 = 22 -- (16x8)
+--[[const]] SPRITE_FUEL_ROCKET    = 20 -- (16x8)
+--[[const]] SPRITE_FUEL_ROCKET2   = 22 -- (16x8)
 
 
 --[[const]] SPRITE_PLAYER_SHIP    = 26
@@ -42,15 +42,15 @@
 
 SPRITE_EXPLOSION = { 128, 130, 132, 134, 136, 138, 140, 142 } -- (16x16)
 
---[[const]] SOUND_SHOOT_CHANNEL = 0
---[[const]] SOUND_SHOOT = 2
+--[[const]] SOUND_SHOOT_CHANNEL     = 0
+--[[const]] SOUND_SHOOT             = 2
 --[[const]] SOUND_EXPLOSION_CHANNEL = 1
---[[const]] SOUND_EXPLOSION = 3
---[[const]] SOUND_HUM_CHANNEL = 3
---[[const]] SOUND_HUM_FIRST = 16
---[[const]] SOUND_HUM_LAST = 20
---[[const]] SOUND_ALARM_CHANNEL = 3
---[[const]] SOUND_ALARM = 5
+--[[const]] SOUND_EXPLOSION         = 3
+--[[const]] SOUND_HUM_CHANNEL       = 3
+--[[const]] SOUND_HUM_FIRST         = 16
+--[[const]] SOUND_HUM_LAST          = 20
+--[[const]] SOUND_ALARM_CHANNEL     = 3
+--[[const]] SOUND_ALARM             = 5
 
 --[[const]] TILE_OUTLINE_COLOR = BLUE
 
@@ -108,7 +108,7 @@ end
 --[[const]] NUM_CAVERNS        = 5     -- total number of caverns; after the last, return to title
 
 -- player lives
---[[const]] PLAYER_LIVES       = 5     -- starting lives
+--[[const]] PLAYER_LIVES       = 3     -- starting lives
 --[[const]] PLAYER_FUEL_MAX    = 99    -- maximum fuel
 --[[const]] FUEL_DESCENT_RATE  = 8     -- world pixels of descent per 1 unit of fuel consumed
 --[[const]] FUEL_PICKUP_AMT    = 10    -- fuel restored when a fuel tank or fuel rocket is destroyed

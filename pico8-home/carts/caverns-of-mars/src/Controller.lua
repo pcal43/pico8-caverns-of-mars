@@ -26,7 +26,7 @@ function _init()
 					yield()
 				end
 				if currentScreen.isGameOver then
-					currentScreen = GameOverScreen.new(score)
+					currentScreen = GameOverScreen.new()
 					while not currentScreen.isDone do
 						yield()
 					end
