@@ -13,7 +13,7 @@ function _init()
 			currentScreen = TitleScreen.new()
 			while not currentScreen.isDone do
 				yield()
-			end
+			end	
 			score = 0
 			local keep_playing = true
 			while keep_playing do
