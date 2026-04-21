@@ -31,7 +31,7 @@ function GameOverScreen:draw()
     print("\^w"..go, (128 - #go * 8) \ 2, 32, WHITE)
 
     -- scores
-    local sc_str = "your score  "..self.score
+    local sc_str = "your score  "..score
     local hi_str = "high score  "..highScore
     print(sc_str, (128 - #sc_str * 4) \ 2, 50, WHITE)
     print(hi_str, (128 - #hi_str * 4) \ 2, 60, WHITE)
