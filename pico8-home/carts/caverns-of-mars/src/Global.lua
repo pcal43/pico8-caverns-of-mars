@@ -40,8 +40,7 @@
 --[[const]] SPRITE_BASE_BRICK_LEFT      = 12
 --[[const]] SPRITE_BASE_BRICK_RIGHT     = 13
 
-
---[[const]] SPRITE_EXPLOSION = { 128, 130, 132, 134, 136, 138, 140, 142 } -- (16x16)
+SPRITE_EXPLOSION = { 128, 130, 132, 134, 136, 138, 140, 142 } -- (16x16)
 
 --[[const]] SOUND_SHOOT_CHANNEL = 0
 --[[const]] SOUND_SHOOT = 2

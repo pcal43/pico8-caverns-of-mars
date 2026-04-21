@@ -354,7 +354,7 @@ function GameScreen:updateBullets()
                         local s = tgt.spr == SPRITE_FUEL_ROCKET and SCORE_WAVE_FUEL or SCORE_WAVE_ROCKET
                         score += s
                         if tgt.spr == SPRITE_FUEL_ROCKET then
-                            self.fuel = mid(0, self.fuel + 25, PLAYER_FUEL_MAX)
+                            self.fuel = mid(0, self.fuel + FUEL_PICKUP_AMT, PLAYER_FUEL_MAX)
                         end
                         spawn_explosion(self.explosions, tgt.x + tgt.spr_w * 4, tgt.y + bwy, ROCKET_WAVE_SCROLL_SPEED)
                         hit = true
@@ -371,7 +371,7 @@ function GameScreen:updateBullets()
                             tgt.alive  = false
                             score += SCORE_BY_TTYPE[tgt.ttype] or 0
                             if tgt.ttype == TTYPE_FUEL then
-                                self.fuel = mid(0, self.fuel + 25, PLAYER_FUEL_MAX)
+                                self.fuel = mid(0, self.fuel + FUEL_PICKUP_AMT, PLAYER_FUEL_MAX)
                             end
                             spawn_explosion(self.explosions, tgt.x, tgt.world_y)
                             hit = true

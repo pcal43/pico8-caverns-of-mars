@@ -20,7 +20,7 @@ end
 function rep(ctx, count, rowDefs) 
     local is_fn = type(rowDefs) == "function"
     local is_single_row = not is_fn and type(rowDefs[1]) == "number"
-    for i=1,count do
+    for _=1,count do
         if is_fn then
             rowDefs(ctx)
         elseif is_single_row then
@@ -66,7 +66,7 @@ section(ctx, {
 end
 
 function genOpenTunnel(ctx, rowCount)
-    for i=1,rowCount do
+    for _=1,rowCount do
         add(ctx.rows, {  1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 })
     end
 end
@@ -190,7 +190,7 @@ EASY_BASE_SECTION = {
 
 -- Builds the gameplay Level.  outputRows must be an array; after the function returns,
 -- it will contain 16-element arrays for each row in the level.
-function buildCavern(difficulty, cavern) 
+function buildCavern(_, cavern) 
     local level = {
         rows = {},
         checkpoints = {},
